@@ -29,8 +29,8 @@ docker compose up -d --build
 或者直接拉 CI 产出的镜像：
 
 ```bash
-docker pull ghcr.io/<owner>/<repo>:latest
-# 按需在 docker-compose.yml 里把 build: . 换成 image: ghcr.io/<owner>/<repo>:latest
+docker pull ghcr.io/lroccoon/token-aggregator:latest
+# 按需在 docker-compose.yml 里把 build: . 换成 image: ghcr.io/lroccoon/token-aggregator:latest
 ```
 
 建议前置 nginx/caddy 做 TLS。服务容器监听 8080，数据写入 `./data/usage.db`。
