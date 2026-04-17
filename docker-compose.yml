@@ -17,3 +17,5 @@ services:
       LARK_SLOT_TEMPLATE_PATH: ${LARK_SLOT_TEMPLATE_PATH:-}
     volumes:
       - ./data:/data
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
