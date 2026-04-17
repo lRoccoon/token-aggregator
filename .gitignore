@@ -1,0 +1,20 @@
+# Runtime artifacts
+lark-token-slot/logs/
+token-aggregator/data/
+token-aggregator/dev.db
+token-aggregator/dev.db-*
+token-aggregator/token-aggregator
+
+# Local env
+.env
+*.env.local
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go build cache
+/vendor/

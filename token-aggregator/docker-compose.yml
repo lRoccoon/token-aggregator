@@ -1,0 +1,19 @@
+services:
+  token-aggregator:
+    build: .
+    image: token-aggregator:latest
+    container_name: token-aggregator
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${BIND_PORT:-8080}:8080"
+    environment:
+      INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN required}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      TIMEZONE: ${TIMEZONE:-Asia/Shanghai}
+      LARK_SLOT_ID: ${LARK_SLOT_ID:-}
+      LARK_SLOT_CREDENTIAL: ${LARK_SLOT_CREDENTIAL:-}
+      LARK_SLOT_API_URL: ${LARK_SLOT_API_URL:-}
+      LARK_SLOT_INTERVAL: ${LARK_SLOT_INTERVAL:-}
+      LARK_SLOT_TEMPLATE_PATH: ${LARK_SLOT_TEMPLATE_PATH:-}
+    volumes:
+      - ./data:/data
