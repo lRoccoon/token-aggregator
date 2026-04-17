@@ -1,9 +1,8 @@
 # Runtime artifacts
-lark-token-slot/logs/
-token-aggregator/data/
-token-aggregator/dev.db
-token-aggregator/dev.db-*
-token-aggregator/token-aggregator
+/data/
+/dev.db
+/dev.db-*
+/token-aggregator
 
 # Local env
 .env
@@ -16,5 +15,5 @@ token-aggregator/token-aggregator
 *.swp
 *.swo
 
-# Go build cache
+# Go
 /vendor/
