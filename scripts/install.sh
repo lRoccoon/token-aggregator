@@ -124,6 +124,12 @@ install_cmd() {
     arch:curl)        echo "sudo pacman -S --needed curl" ;;
     arch:crontab)     echo "sudo pacman -S --needed cronie && sudo systemctl enable --now cronie" ;;
 
+    macos:jq)         echo "brew install jq" ;;
+    debian:jq)        echo "sudo apt-get install -y jq" ;;
+    rhel:jq)          echo "sudo dnf install -y jq" ;;
+    alpine:jq)        echo "sudo apk add --no-cache jq" ;;
+    arch:jq)          echo "sudo pacman -S --needed jq" ;;
+
     *)                echo "install ${pkg} via your package manager" ;;
   esac
 }
@@ -178,6 +184,10 @@ if [[ "${need_sqlite}" == "1" ]] && ! command -v sqlite3 >/dev/null; then
   warn "sqlite3 not found; needed by hermes-agent collection"
   hint "$(install_cmd "${OS}" sqlite3)"
   missing=1
+fi
+if ! command -v jq >/dev/null; then
+  warn "jq not found; collector logs will show today/total as '?'"
+  hint "$(install_cmd "${OS}" jq)"
 fi
 if [[ "${NO_CRON}" != "1" ]] && ! command -v crontab >/dev/null; then
   warn "crontab not found; cron step will be skipped"
