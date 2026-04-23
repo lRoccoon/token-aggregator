@@ -182,21 +182,22 @@ Aggregator 可以把聚合后的 `/report` 结果定时推送到飞书自定义 
 使用 Go `text/template`，数据对象是 `/report` 返回的 `Report` 结构。若 `LARK_SLOT_TEMPLATE_PATH` 文件不存在则使用内置默认模板：
 
 ```
-已经消耗词元：今日 {{millions .TodayTokens}} / 总计 {{millions .TotalTokens}}，白赚 {{money .TotalCost}}
+已经消耗词元：今日 {{tokens .TodayTokens}} / 总计 {{tokens .TotalTokens}}，白赚 {{money .TotalCost}}
 ```
 
 内置模板函数：
 
 | 函数 | 输入 | 输出 |
 |---|---|---|
-| `millions` | `int64` tokens | `"XM"`（整数百万） |
+| `tokens` | `int64` tokens | 按进制自动选单位：`"980"` / `"1.2K"` / `"15M"` / `"2.3B"` / `"1T"` |
+| `millions` | `int64` tokens | `tokens` 的别名，保留向后兼容 |
 | `money` | `float64` USD | `"$X.XX"` |
 
 自定义例子（放到 `./data/slot_template.tmpl`）：
 
 ```
-今日 {{millions .TodayTokens}} · 总计 {{millions .TotalTokens}} · 花了 {{money .TotalCost}}
-{{range $dev, $agg := .Devices}}  [{{$dev}}] {{millions $agg.TodayTokens}}
+今日 {{tokens .TodayTokens}} · 总计 {{tokens .TotalTokens}} · 花了 {{money .TotalCost}}
+{{range $dev, $agg := .Devices}}  [{{$dev}}] {{tokens $agg.TodayTokens}}
 {{end}}
 ```
 
