@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -16,7 +17,7 @@ import (
 
 const defaultSlotAPIURL = "https://l.garyyang.work/api/slot/update"
 
-const defaultSlotTemplate = `已经消耗词元：今日 {{millions .TodayTokens}} / 总计 {{millions .TotalTokens}}，白赚 {{money .TotalCost}}`
+const defaultSlotTemplate = `已经消耗词元：今日 {{tokens .TodayTokens}} / 总计 {{tokens .TotalTokens}}，白赚 {{money .TotalCost}}`
 
 type SlotConfig struct {
 	SlotID       string
@@ -41,10 +42,46 @@ func NewSlotPusher(cfg SlotConfig, store *Store) *SlotPusher {
 		store:  store,
 		client: &http.Client{Timeout: 15 * time.Second},
 		funcs: template.FuncMap{
-			"millions": func(n int64) string { return fmt.Sprintf("%dM", n/1_000_000) },
+			"tokens":   humanTokens,
+			"millions": humanTokens, // 向后兼容旧模板
 			"money":    func(f float64) string { return fmt.Sprintf("$%.2f", f) },
 		},
 	}
+}
+
+// humanTokens 按进制自动选择单位输出 token 计数：< 1K 显示整数，
+// 其余使用 K / M / B / T。小于 10 的量保留一位小数，其余取整。
+func humanTokens(n int64) string {
+	if n < 0 {
+		return "-" + humanTokens(-n)
+	}
+	const (
+		k = 1_000
+		m = 1_000_000
+		b = 1_000_000_000
+		t = 1_000_000_000_000
+	)
+	switch {
+	case n >= t:
+		return formatTokenUnit(float64(n)/float64(t), "T")
+	case n >= b:
+		return formatTokenUnit(float64(n)/float64(b), "B")
+	case n >= m:
+		return formatTokenUnit(float64(n)/float64(m), "M")
+	case n >= k:
+		return formatTokenUnit(float64(n)/float64(k), "K")
+	default:
+		return strconv.FormatInt(n, 10)
+	}
+}
+
+func formatTokenUnit(v float64, unit string) string {
+	if v < 10 {
+		s := strconv.FormatFloat(v, 'f', 1, 64)
+		s = strings.TrimSuffix(s, ".0")
+		return s + unit
+	}
+	return strconv.FormatFloat(v, 'f', 0, 64) + unit
 }
 
 func (p *SlotPusher) Run(ctx context.Context) {
