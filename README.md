@@ -41,7 +41,9 @@ docker pull ghcr.io/lroccoon/token-aggregator:latest
 |---|---|---|---|
 | `/healthz` | GET | 否 | 健康检查 |
 | `/ingest` | POST | Bearer | 采集上报（见下） |
-| `/report` | GET | Bearer | 聚合报告 JSON |
+| `/report` | GET | Bearer | 当前日 + 全量聚合报告 JSON |
+| `/history?days=N` | GET | Bearer | 过去 N 天每日 token / cost 历史，默认 30 天，最大 365 天 |
+| `/dashboard` | GET | 否 | Web 看板页面，可快速筛选最近一周、一月、半年、一年 |
 | `/install.sh` | GET | 否 | 安装脚本（embed 的 SERVER_URL 自动替换） |
 | `/collector.sh` | GET | 否 | 采集脚本（供 install.sh 下载） |
 
@@ -84,6 +86,48 @@ docker pull ghcr.io/lroccoon/token-aggregator:latest
   }
 }
 ```
+
+### /history 响应示例
+
+`/history` 返回固定长度的每日序列，即使某天没有数据也会补 0，便于前端画连续趋势图：
+
+```json
+{
+  "today": "2026-04-17",
+  "from": "2026-03-19",
+  "to": "2026-04-17",
+  "days": 30,
+  "summary": {
+    "total_tokens": 925000000,
+    "total_cost_usd": 520.31,
+    "avg_tokens_per_day": 30833333,
+    "avg_cost_usd_per_day": 17.343666666666667
+  },
+  "daily": [
+    {
+      "date": "2026-04-17",
+      "total_tokens": 48000000,
+      "cost_usd": 28.2,
+      "sources": {
+        "claude": { "total_tokens": 15000000, "cost_usd": 9.1 },
+        "codex": { "total_tokens": 7000000, "cost_usd": 4.2 }
+      }
+    }
+  ]
+}
+```
+
+### Web 看板
+
+打开 `/dashboard` 可以查看现代化图表看板：
+
+- 顶部 summary cards：总 token、总 cost、日均 token、日均 cost
+- 趋势图：token 柱状图 + cost 折线图
+- 来源分布：按 source 聚合 token
+- 每日明细表
+- 快速筛选：最近 7 / 30 / 180 / 365 天，也可以输入 1-365 的自定义 N
+
+如果服务端配置了 `INGEST_TOKEN`，看板请求 `/history` 也需要鉴权。可以在页面右上角的 `Bearer token` 输入框填入 token 后点击“应用”；页面仅把 token 保存在当前浏览器标签页的 `sessionStorage` 中。也支持用 `?token=<INGEST_TOKEN>` 首次打开，页面会立即从地址栏移除 token 并写入 `sessionStorage`。
 
 ## 二、安装采集端
 
