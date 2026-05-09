@@ -21,9 +21,12 @@ func openTestStore(t *testing.T) *Store {
 
 func TestBuildHistoryEmpty(t *testing.T) {
 	store := openTestStore(t)
-	hist, err := store.BuildHistory("2026-05-02", 7)
+	hist, err := store.BuildHistory("2026-05-02", 7, HistoryFilters{})
 	if err != nil {
 		t.Fatalf("BuildHistory: %v", err)
+	}
+	if len(hist.Devices) != 0 || len(hist.Sources) != 0 {
+		t.Errorf("empty store should yield empty Devices/Sources, got %+v / %+v", hist.Devices, hist.Sources)
 	}
 	if hist.Today != "2026-05-02" {
 		t.Errorf("Today = %q, want 2026-05-02", hist.Today)
@@ -69,7 +72,7 @@ func TestBuildHistoryAggregatesAndWindowing(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	hist, err := store.BuildHistory("2026-05-02", 7)
+	hist, err := store.BuildHistory("2026-05-02", 7, HistoryFilters{})
 	if err != nil {
 		t.Fatalf("BuildHistory: %v", err)
 	}
@@ -136,7 +139,7 @@ func TestBuildHistoryDaysOne(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	hist, err := store.BuildHistory("2026-05-02", 1)
+	hist, err := store.BuildHistory("2026-05-02", 1, HistoryFilters{})
 	if err != nil {
 		t.Fatalf("BuildHistory: %v", err)
 	}
@@ -150,18 +153,182 @@ func TestBuildHistoryDaysOne(t *testing.T) {
 
 func TestBuildHistoryRejectsNonPositiveDays(t *testing.T) {
 	store := openTestStore(t)
-	if _, err := store.BuildHistory("2026-05-02", 0); err == nil {
+	if _, err := store.BuildHistory("2026-05-02", 0, HistoryFilters{}); err == nil {
 		t.Errorf("BuildHistory(days=0) should error")
 	}
-	if _, err := store.BuildHistory("2026-05-02", -3); err == nil {
+	if _, err := store.BuildHistory("2026-05-02", -3, HistoryFilters{}); err == nil {
 		t.Errorf("BuildHistory(days=-3) should error")
 	}
 }
 
 func TestBuildHistoryRejectsBadDate(t *testing.T) {
 	store := openTestStore(t)
-	if _, err := store.BuildHistory("not-a-date", 7); err == nil {
+	if _, err := store.BuildHistory("not-a-date", 7, HistoryFilters{}); err == nil {
 		t.Errorf("BuildHistory should reject malformed today")
+	}
+}
+
+func TestBuildHistoryDevicesAndBreakdown(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.Upsert([]Record{
+		{DeviceID: "laptop", Source: "claude", Date: "2026-05-02", TotalTokens: 1000, CostUSD: 0.10},
+		{DeviceID: "laptop", Source: "codex", Date: "2026-05-02", TotalTokens: 500, CostUSD: 0.05},
+		{DeviceID: "vps", Source: "claude", Date: "2026-05-02", TotalTokens: 200, CostUSD: 0.02},
+		{DeviceID: "vps", Source: "claude", Date: "2026-05-01", TotalTokens: 700, CostUSD: 0.07},
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	hist, err := store.BuildHistory("2026-05-02", 3, HistoryFilters{})
+	if err != nil {
+		t.Fatalf("BuildHistory: %v", err)
+	}
+
+	wantDevices := []string{"laptop", "vps"}
+	if !equalStrings(hist.Devices, wantDevices) {
+		t.Errorf("Devices = %v, want %v", hist.Devices, wantDevices)
+	}
+	wantSources := []string{"claude", "codex"}
+	if !equalStrings(hist.Sources, wantSources) {
+		t.Errorf("Sources = %v, want %v", hist.Sources, wantSources)
+	}
+
+	byDate := map[string]DailyEntry{}
+	for _, d := range hist.Daily {
+		byDate[d.Date] = d
+	}
+	d502 := byDate["2026-05-02"]
+	if d502.Devices["laptop"].TotalTokens != 1500 {
+		t.Errorf("2026-05-02 laptop tokens = %d, want 1500", d502.Devices["laptop"].TotalTokens)
+	}
+	if !floatEq(d502.Devices["laptop"].CostUSD, 0.15) {
+		t.Errorf("2026-05-02 laptop cost = %f, want 0.15", d502.Devices["laptop"].CostUSD)
+	}
+	if d502.Devices["vps"].TotalTokens != 200 {
+		t.Errorf("2026-05-02 vps tokens = %d, want 200", d502.Devices["vps"].TotalTokens)
+	}
+	if d502.Breakdown["laptop"]["codex"].TotalTokens != 500 {
+		t.Errorf("breakdown laptop/codex = %d, want 500", d502.Breakdown["laptop"]["codex"].TotalTokens)
+	}
+	if d502.Breakdown["vps"]["claude"].TotalTokens != 200 {
+		t.Errorf("breakdown vps/claude = %d, want 200", d502.Breakdown["vps"]["claude"].TotalTokens)
+	}
+	if _, ok := d502.Breakdown["laptop"]["unknown"]; ok {
+		t.Errorf("breakdown should not contain laptop/unknown")
+	}
+}
+
+func TestBuildHistoryDimensionsLimitedToWindow(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.Upsert([]Record{
+		{DeviceID: "laptop", Source: "claude", Date: "2026-05-02", TotalTokens: 100},
+		{DeviceID: "old-vps", Source: "legacy", Date: "2026-04-25", TotalTokens: 500}, // outside 7d window
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	hist, err := store.BuildHistory("2026-05-02", 7, HistoryFilters{})
+	if err != nil {
+		t.Fatalf("BuildHistory: %v", err)
+	}
+	if !equalStrings(hist.Devices, []string{"laptop"}) {
+		t.Errorf("Devices = %v, want [laptop]", hist.Devices)
+	}
+	if !equalStrings(hist.Sources, []string{"claude"}) {
+		t.Errorf("Sources = %v, want [claude]", hist.Sources)
+	}
+}
+
+func TestBuildHistoryFilterByDevice(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.Upsert([]Record{
+		{DeviceID: "laptop", Source: "claude", Date: "2026-05-02", TotalTokens: 1000, CostUSD: 0.10},
+		{DeviceID: "vps", Source: "claude", Date: "2026-05-02", TotalTokens: 200, CostUSD: 0.02},
+		{DeviceID: "vps", Source: "codex", Date: "2026-05-02", TotalTokens: 50, CostUSD: 0.005},
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	hist, err := store.BuildHistory("2026-05-02", 3, HistoryFilters{Devices: []string{"vps"}})
+	if err != nil {
+		t.Fatalf("BuildHistory: %v", err)
+	}
+	if hist.Summary.TotalTokens != 250 {
+		t.Errorf("Summary tokens = %d, want 250 (vps only)", hist.Summary.TotalTokens)
+	}
+	d502 := hist.Daily[len(hist.Daily)-1]
+	if _, ok := d502.Devices["laptop"]; ok {
+		t.Errorf("filtered result must not contain laptop, got %+v", d502.Devices)
+	}
+	if d502.Devices["vps"].TotalTokens != 250 {
+		t.Errorf("vps tokens = %d, want 250", d502.Devices["vps"].TotalTokens)
+	}
+	wantDevices := []string{"laptop", "vps"}
+	if !equalStrings(hist.Devices, wantDevices) {
+		t.Errorf("Devices candidate list should still contain both, got %v", hist.Devices)
+	}
+	if !equalStrings(hist.Filters.Devices, []string{"vps"}) {
+		t.Errorf("Filters.Devices = %v, want [vps]", hist.Filters.Devices)
+	}
+}
+
+func TestBuildHistoryFilterBySource(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.Upsert([]Record{
+		{DeviceID: "laptop", Source: "claude", Date: "2026-05-02", TotalTokens: 1000, CostUSD: 0.10},
+		{DeviceID: "laptop", Source: "codex", Date: "2026-05-02", TotalTokens: 500, CostUSD: 0.05},
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	hist, err := store.BuildHistory("2026-05-02", 3, HistoryFilters{Sources: []string{"codex"}})
+	if err != nil {
+		t.Fatalf("BuildHistory: %v", err)
+	}
+	if hist.Summary.TotalTokens != 500 {
+		t.Errorf("Summary tokens = %d, want 500", hist.Summary.TotalTokens)
+	}
+	d502 := hist.Daily[len(hist.Daily)-1]
+	if _, ok := d502.Sources["claude"]; ok {
+		t.Errorf("filtered result must not contain claude, got %+v", d502.Sources)
+	}
+}
+
+func TestBuildHistoryFilterCombined(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.Upsert([]Record{
+		{DeviceID: "laptop", Source: "claude", Date: "2026-05-02", TotalTokens: 1000},
+		{DeviceID: "laptop", Source: "codex", Date: "2026-05-02", TotalTokens: 500},
+		{DeviceID: "vps", Source: "claude", Date: "2026-05-02", TotalTokens: 200},
+		{DeviceID: "vps", Source: "codex", Date: "2026-05-02", TotalTokens: 50},
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	hist, err := store.BuildHistory("2026-05-02", 3, HistoryFilters{
+		Devices: []string{"laptop"},
+		Sources: []string{"codex"},
+	})
+	if err != nil {
+		t.Fatalf("BuildHistory: %v", err)
+	}
+	if hist.Summary.TotalTokens != 500 {
+		t.Errorf("Summary tokens = %d, want 500 (laptop+codex)", hist.Summary.TotalTokens)
+	}
+}
+
+func TestParseFilterValues(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{",", nil},
+		{"laptop", []string{"laptop"}},
+		{" laptop , vps ", []string{"laptop", "vps"}},
+		{"laptop,laptop,vps", []string{"laptop", "vps"}},
+		{"vps,laptop", []string{"laptop", "vps"}}, // sorted
+	}
+	for _, c := range cases {
+		got := parseFilterValues(c.in)
+		if !equalStrings(got, c.want) {
+			t.Errorf("parseFilterValues(%q) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }
 
@@ -255,6 +422,42 @@ func TestHandleHistoryRejectsInvalidDays(t *testing.T) {
 	}
 }
 
+func TestHandleHistoryAppliesFilters(t *testing.T) {
+	srv := newTestServer(t, "")
+	if err := srv.Store.Upsert([]Record{
+		{DeviceID: "laptop", Source: "claude", Date: "2026-05-02", TotalTokens: 1000, CostUSD: 0.10},
+		{DeviceID: "laptop", Source: "codex", Date: "2026-05-02", TotalTokens: 500, CostUSD: 0.05},
+		{DeviceID: "vps", Source: "claude", Date: "2026-05-02", TotalTokens: 200, CostUSD: 0.02},
+		{DeviceID: "vps", Source: "codex", Date: "2026-05-02", TotalTokens: 50, CostUSD: 0.005},
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	mux := srv.routes()
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/history?today=2026-05-02&days=3&devices=laptop&sources=codex,claude", nil)
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var got History
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Summary.TotalTokens != 1500 {
+		t.Errorf("Summary tokens = %d, want 1500 (laptop only)", got.Summary.TotalTokens)
+	}
+	if !equalStrings(got.Filters.Devices, []string{"laptop"}) {
+		t.Errorf("Filters.Devices = %v, want [laptop]", got.Filters.Devices)
+	}
+	if !equalStrings(got.Filters.Sources, []string{"claude", "codex"}) {
+		t.Errorf("Filters.Sources = %v, want [claude codex]", got.Filters.Sources)
+	}
+	if !equalStrings(got.Devices, []string{"laptop", "vps"}) {
+		t.Errorf("candidate Devices = %v, want [laptop vps]", got.Devices)
+	}
+}
+
 func TestHandleDashboardServesHTML(t *testing.T) {
 	srv := newTestServer(t, "")
 	mux := srv.routes()
@@ -286,7 +489,7 @@ func TestDashboardEscapesDynamicValues(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, marker := range []string{"const esc =", "esc(name)", "esc(Object.keys", "sessionStorage", "history.replaceState"} {
+	for _, marker := range []string{"const esc =", "esc(name)", "esc(dev)", "sessionStorage", "history.replaceState"} {
 		if !strings.Contains(body, marker) {
 			t.Errorf("dashboard body missing XSS/auth hardening marker %q", marker)
 		}
@@ -294,6 +497,18 @@ func TestDashboardEscapesDynamicValues(t *testing.T) {
 	if strings.Contains(body, "localStorage.setItem('tokenAggregatorToken'") {
 		t.Errorf("dashboard must not persist bearer token to localStorage")
 	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func floatEq(a, b float64) bool {
