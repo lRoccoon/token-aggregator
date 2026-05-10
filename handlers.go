@@ -42,6 +42,8 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/ingest", s.handleIngest)
 	mux.HandleFunc("/report", s.handleReport)
+	mux.HandleFunc("/history", s.handleHistory)
+	mux.HandleFunc("/dashboard", s.handleDashboard)
 	mux.HandleFunc("/unknown-models", s.handleUnknownModels)
 	mux.HandleFunc("/install.sh", s.handleInstall)
 	mux.HandleFunc("/collector.sh", s.handleCollector)
